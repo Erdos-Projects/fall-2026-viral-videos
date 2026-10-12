@@ -22,7 +22,7 @@ jobs:
       - name: Check out the private data repo
         uses: actions/checkout@v4
         with:
-          repository: YOUR_GITHUB_USERNAME/shorts-data   # <-- your PRIVATE data repo
+          repository: shivankgoel003/shorts-data
           token: ${{ secrets.DATA_REPO_TOKEN }}
           path: data-repo
 
