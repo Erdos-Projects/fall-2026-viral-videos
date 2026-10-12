@@ -1,0 +1,61 @@
+name: collect
+
+# Runs hourly, a little past the hour because scheduled jobs are most likely to be
+# delayed at :00 under GitHub load. Manual runs are allowed via the Actions tab.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+# Never let two collection runs overlap.
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code (this public repo)
+        uses: actions/checkout@v4
+
+      - name: Check out the private data repo
+        uses: actions/checkout@v4
+        with:
+          repository: YOUR_GITHUB_USERNAME/shorts-data   # <-- your PRIVATE data repo
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          path: data-repo
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Collect
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          DATA_DIR: data-repo/data        # write CSVs inside the data repo checkout
+          # Optional overrides:
+          # TARGET_NEW_PER_RUN: "150"
+          # MAX_SEARCH_PAGES: "3"
+          # DISCOVER_WINDOW_MIN: "180"
+          # CUTOFF_HOURS: "80"
+        run: python collect.py
+
+      - name: Audit dataset
+        run: python audit.py data-repo/data
+
+      - name: Commit and push the data
+        working-directory: data-repo
+        run: |
+          git config user.name "shorts-collector-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing new to commit."
+          else
+            git commit -m "snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            git pull --rebase --autostash
+            git push
+          fi
