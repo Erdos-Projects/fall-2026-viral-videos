@@ -3,8 +3,6 @@ name: collect
 # Runs hourly, a little past the hour because scheduled jobs are most likely to be
 # delayed at :00 under GitHub load. Manual runs are allowed via the Actions tab.
 on:
-  schedule:
-    - cron: "23 * * * *"
   workflow_dispatch:
 
 # Never let two collection runs overlap.
