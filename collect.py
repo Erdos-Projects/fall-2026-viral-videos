@@ -282,6 +282,17 @@ def main():
 
     print(f"{observed_at}  search candidates not yet stored: {len(new_ids)} | accepted videos: {accepted_count} | tracking: {len(targets)} | "
           f"observations written: {len(observations)}")
+  
+    # Country enrichment runs after the important snapshots.
+    # A country lookup failure should not interrupt collection.
+    try:
+        count = fetch_missing_channel_countries(
+            youtube, observed_at
+        )
+        print(f"Country metadata saved for {count} channels")
+    except Exception as exc:
+        print(f"::warning::country lookup failed: {exc!r}")
+
 
 
 if __name__ == "__main__":
