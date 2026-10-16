@@ -30,6 +30,16 @@ NUM_RETRIES = 3
 
 VIDEOS_CSV = os.path.join(DATA_DIR, "videos.csv")
 CHANNELS_CSV = os.path.join(DATA_DIR, "channels.csv")
+
+COUNTRIES_CSV = os.path.join(DATA_DIR, "channel_countries.csv")
+
+COUNTRY_COLS = [
+    "channel_id",
+    "channel_country",
+    "country_checked_at"
+]
+
+
 OBS_DIR = os.path.join(DATA_DIR, "observations")
 
 VIDEO_COLS = ["video_id", "first_seen_at", "published_at", "channel_id", "channel_title",
@@ -150,6 +160,44 @@ def fetch_new_channels(youtube, channel_ids, seen_at):
                 "total_channel_videos": stats.get("videoCount", ""),
             })
     return rows
+
+
+def fetch_missing_channel_countries(youtube, checked_at):
+    """Backfill country for existing and newly discovered channels."""
+
+    if not os.path.exists(CHANNELS_CSV):
+        return 0
+
+    # All channels currently stored
+    all_ids = known_ids(CHANNELS_CSV, "channel_id")
+
+    # Channels whose country has already been checked
+    checked_ids = known_ids(COUNTRIES_CSV, "channel_id")
+
+    # Only query channels not checked previously
+    missing_ids = sorted(all_ids - checked_ids)
+
+    saved = 0
+
+    for batch in batched(missing_ids, 50):
+        response = youtube.channels().list(
+            part="snippet",
+            id=",".join(batch)
+        ).execute(num_retries=NUM_RETRIES)
+
+        rows = []
+
+        for item in response.get("items", []):
+            rows.append({
+                "channel_id": item["id"],
+                "channel_country": item["snippet"].get("country", ""),
+                "country_checked_at": checked_at
+            })
+
+        append_rows(COUNTRIES_CSV, COUNTRY_COLS, rows)
+        saved += len(rows)
+
+    return saved
 
 
 def missing_channel_ids():
