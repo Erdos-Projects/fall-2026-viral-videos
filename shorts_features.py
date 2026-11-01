@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 STUDY_COUNTRIES = ("US", "CA")
+FROZEN_DATASET = "shorts-data-frozen-2026-10-31-c704032"
 EMOJI_PATTERN = "[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF☀-➿⬀-⯿]"
 
 
@@ -26,14 +27,12 @@ class ShortsData:
     n_snapshot_files: int
 
 
-def find_data_dir(start=None):
-    """Locate shorts-data-main/shorts-data-main/data from the repository root or project/."""
-    start = Path(start or Path.cwd())
-    for base in [start, start / "project"]:
-        candidate = base / "shorts-data-main" / "shorts-data-main" / "data"
-        if candidate.is_dir():
-            return candidate
-    raise FileNotFoundError(f"No shorts-data-main/shorts-data-main/data under {start}")
+def find_data_dir():
+    """Locate the frozen data copy beside this project directory."""
+    candidate = Path(__file__).resolve().parent.parent / FROZEN_DATASET / "data"
+    if candidate.is_dir():
+        return candidate
+    raise FileNotFoundError(f"Frozen data folder not found: {candidate}")
 
 
 def to_utc(values):
@@ -62,15 +61,17 @@ def load_data(data_dir=None):
 
 def snapshot_as_of(obs, hour, window):
     """Latest snapshot with age in [hour - window, hour]: use for features (no look-ahead)."""
-    candidates = obs[obs["age_hours"].between(hour - window, hour)].dropna(subset=["view_count"])
-    return candidates.sort_values(["video_id", "age_hours"]).drop_duplicates("video_id", keep="last").set_index("video_id")
+    age_col = "exact_age_hours" if "exact_age_hours" in obs else "age_hours"
+    candidates = obs[obs[age_col].between(hour - window, hour)].dropna(subset=["view_count"])
+    return candidates.sort_values(["video_id", age_col]).drop_duplicates("video_id", keep="last").set_index("video_id")
 
 
 def snapshot_nearest(obs, hour, tol):
     """Snapshot closest to age `hour` within ± tol: use for outcomes."""
-    candidates = obs[obs["age_hours"].between(hour - tol, hour + tol)].dropna(subset=["view_count"])
-    candidates = candidates.assign(_distance=(candidates["age_hours"] - hour).abs())
-    return (candidates.sort_values(["video_id", "_distance", "age_hours"])
+    age_col = "exact_age_hours" if "exact_age_hours" in obs else "age_hours"
+    candidates = obs[obs[age_col].between(hour - tol, hour + tol)].dropna(subset=["view_count"])
+    candidates = candidates.assign(_distance=(candidates[age_col] - hour).abs())
+    return (candidates.sort_values(["video_id", "_distance", age_col])
             .drop_duplicates("video_id").drop(columns="_distance").set_index("video_id"))
 
 
@@ -89,50 +90,84 @@ def build_model_table(data, cutoff_hour=6, mid_hour=3, window=1, outcome_hours=7
 
     Returns (table, feature_groups); feature_groups maps a group name to its column names.
     """
-    obs = data.observations
-    outcome = snapshot_nearest(obs, outcome_hours, outcome_tol)["view_count"].rename(f"views_{outcome_hours}h")
-    snapshots = [
-        snapshot_as_of(obs, hour, window)[["view_count", "like_count", "comment_count"]]
-        .rename(columns={"view_count": f"views_{hour}h", "like_count": f"likes_{hour}h",
-                         "comment_count": f"comments_{hour}h"})
-        for hour in (mid_hour, cutoff_hour)
-    ]
+    obs = data.observations.merge(
+        data.videos[["video_id", "published_at"]], on="video_id", how="left", validate="many_to_one"
+    )
+    obs["exact_age_hours"] = (obs["observed_at"] - obs["published_at"]).dt.total_seconds() / 3600
+    outcome = (
+        snapshot_nearest(obs, outcome_hours, outcome_tol)[["view_count", "exact_age_hours", "observed_at"]]
+        .rename(columns={
+            "view_count": f"views_{outcome_hours}h",
+            "exact_age_hours": f"outcome_age_{outcome_hours}h",
+            "observed_at": f"outcome_observed_at_{outcome_hours}h",
+        })
+    )
+    mid_snapshot = (
+        snapshot_as_of(obs, mid_hour, window)[["view_count", "exact_age_hours", "observed_at"]]
+        .rename(columns={
+            "view_count": f"views_{mid_hour}h",
+            "exact_age_hours": f"feature_age_{mid_hour}h",
+            "observed_at": f"feature_observed_at_{mid_hour}h",
+        })
+    )
+    cutoff_snapshot = (
+        snapshot_as_of(obs, cutoff_hour, window)[
+            ["view_count", "like_count", "comment_count", "exact_age_hours", "observed_at"]
+        ]
+        .rename(columns={
+            "view_count": f"views_{cutoff_hour}h",
+            "like_count": f"like_count_{cutoff_hour}h",
+            "comment_count": f"comment_count_{cutoff_hour}h",
+            "exact_age_hours": f"feature_age_{cutoff_hour}h",
+            "observed_at": f"feature_observed_at_{cutoff_hour}h",
+        })
+    )
+    channel_data = data.channels.drop(columns=["channel_title"]).rename(
+        columns={"first_seen_at": "channel_stats_observed_at"}
+    )
     table = (
         add_country(data.videos, data.countries).set_index("video_id")
         .join(outcome, how="inner")
-        .join(snapshots)
+        .join([mid_snapshot, cutoff_snapshot])
         .reset_index()
-        .merge(data.channels.drop(columns=["channel_title", "first_seen_at"]),
-               on="channel_id", how="left", validate="many_to_one")
+        .merge(channel_data, on="channel_id", how="left", validate="many_to_one")
     )
     return add_features(table, cutoff_hour, mid_hour)
 
 
 def add_features(df, cutoff_hour=6, mid_hour=3):
-    """Feature groups from the team's plan; every value is known `cutoff_hour` hours after publishing."""
+    """Build feature groups; every value is known by `cutoff_hour` hours after publishing."""
     c, m = cutoff_hour, mid_hour
-    views, likes, comments = df[f"views_{c}h"], df[f"likes_{c}h"], df[f"comments_{c}h"]
+    views = df[f"views_{c}h"]
+    likes = df[f"like_count_{c}h"]
+    comments = df[f"comment_count_{c}h"]
     titles = df["title"].fillna("")
     hour_et = df["published_at"].dt.tz_convert("America/New_York").dt.hour   # reference clock only
+    cutoff_at = df["published_at"] + pd.Timedelta(hours=c)
+    channel_stats_available = df["channel_stats_observed_at"].le(cutoff_at).fillna(False)
+    subscribers = df["subscriber_count"].where(channel_stats_available)
+    channel_views = df["total_channel_views"].where(channel_stats_available)
+    channel_videos = df["total_channel_videos"].where(channel_stats_available)
 
     groups = {
         "early performance": {
             f"log_views_{c}h": np.log1p(views),
-            f"log_views_{m}h": np.log1p(df[f"views_{m}h"]),
             f"view_growth_{m}_to_{c}h": np.log1p(views) - np.log1p(df[f"views_{m}h"]),   # log ratio
         },
-        "engagement": {
-            f"log_likes_{c}h": np.log1p(likes),
-            f"log_comments_{c}h": np.log1p(comments),
-            f"like_rate_{c}h": likes / views.replace(0, np.nan),
-            f"comment_rate_{c}h": comments / views.replace(0, np.nan),
-            f"likes_hidden_{c}h": likes.isna(),   # creator hid likes; informative, not random
+        "engagement": {   # raw counts; intentionally not normalized by view count
+            f"like_count_{c}h": likes,
+            f"comment_count_{c}h": comments,
+            f"likes_hidden_{c}h": likes.isna() & views.notna(),
+        },
+        "engagement log1p alternative": {
+            f"log_like_count_{c}h": np.log1p(likes),
+            f"log_comment_count_{c}h": np.log1p(comments),
         },
         "creator": {   # channel statistics as of first sighting
-            "log_subscribers": np.log1p(df["subscriber_count"]),
+            "log_subscribers": np.log1p(subscribers),
             "channel_age_days": (df["published_at"] - df["channel_created_at"]).dt.total_seconds() / 86400,
-            "log_channel_views": np.log1p(df["total_channel_views"]),
-            "log_channel_avg_views": np.log1p(df["total_channel_views"] / df["total_channel_videos"].clip(lower=1)),
+            "log_channel_views": np.log1p(channel_views),
+            "log_channel_avg_views": np.log1p(channel_views / channel_videos.clip(lower=1)),
         },
         "timing": {   # hour posted, as a cycle so 23:00 and 00:00 are neighbours
             "pub_hour_sin": np.sin(2 * np.pi * hour_et / 24),
@@ -147,4 +182,4 @@ def add_features(df, cutoff_hour=6, mid_hour=3):
     }
     columns = {name: values.astype(float) for group in groups.values() for name, values in group.items()}
     feature_groups = {group: list(cols) for group, cols in groups.items()}
-    return df.assign(**columns), feature_groups
+    return df.assign(channel_stats_available_by_6h=channel_stats_available, **columns), feature_groups
