@@ -33,12 +33,9 @@ jobs:
       - name: Collect
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          DATA_DIR: data-repo/data        # write CSVs inside the data repo checkout
-          # Optional overrides:
-          # TARGET_NEW_PER_RUN: "150"
-          # MAX_SEARCH_PAGES: "3"
-          # DISCOVER_WINDOW_MIN: "180"
-          # CUTOFF_HOURS: "80"
+          DATA_DIR: data-repo/data
+          MAX_SEARCH_PAGES: "0"
+          CUTOFF_HOURS: "80"
         run: python collect.py
 
       - name: Audit dataset
