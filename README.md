@@ -38,16 +38,35 @@ The selected model was **XGBoost (max depth 3)** trained on worldwide videos wit
 | `EDA_final.ipynb` | Exploratory data analysis |
 | `shorts_features.py` | Shared data loading and feature engineering |
 | `Modelling.ipynb` | Cross-validation, ablations, and final evaluation |
+| `make_fake_data.py` | Generates a fake dataset in the real data's format, for running the notebooks |
 | `.github/workflows/collect.yml` | Collection workflow |
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
-pip install pandas numpy matplotlib scikit-learn xgboost notebook
+pip install pandas numpy matplotlib seaborn scikit-learn xgboost notebook
 ```
 
-The analysis notebooks require the private frozen data copy at `../shorts-data-frozen-2026-10-31-c704032/data/`. Without access to that dataset, the published results can be inspected in the notebooks but not fully reproduced.
+The analysis notebooks read the frozen data copy at `../shorts-data-frozen-2026-10-31-c704032/data/`, a folder next to this repository. YouTube's API terms of service do not allow us to publish that data, so the published results can be inspected in the notebooks' saved outputs but not reproduced exactly.
+
+## Running the Code with Fake Data
+
+To show that the code runs end to end, `make_fake_data.py` generates a synthetic dataset with exactly the same files, columns and formats as the real data. All videos, channels and numbers in it are made up, so **results computed on the fake data are meaningless**.
+
+1. **Generate the fake data.** Run this from the repository folder; it takes a few seconds:
+
+   ```bash
+   python make_fake_data.py
+   ```
+
+   This creates `../shorts-data-frozen-2026-10-31-c704032/data/`, the folder both notebooks already read from, so no code changes are needed.
+
+   The script refuses to overwrite a folder that already exists. Use `python make_fake_data.py --out <folder>` to write somewhere else.
+
+2. **Run the notebooks.** Open `EDA_final.ipynb` and `Modelling.ipynb` and run all cells.
+
+   `Modelling.ipynb` scores the held-out test set only when `RUN_FINAL_TEST = True`, which is set in its second cell.
 
 ## Limitations
 
