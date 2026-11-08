@@ -9,6 +9,8 @@ Can we predict which YouTube Shorts will go viral using only their first **six h
 
 An automated collector uses the **YouTube Data API v3**, GitHub Actions, and Google Apps Script to discover `#shorts` candidates and record views, likes, and comments over time. The frozen dataset analyzed here (October 12–November 1, 2026) contains **30,709 videos**, **15,687 channels**, and **2.17 million observations**. Raw data is stored separately in a private repository.
 
+**NOTE**: Youtube's TOS does not allow for API data to be published publicly, so a fake dataset can be generated using `make_fake_data.py` if you want to run the code in your own environment. Otherwise, the outputs in `Modelling.ipynb` and `EDA_final.ipynb` are the final results from running our experiments on real Youtube shorts data.
+
 ## Approach
 
 - **EDA:** Explore view growth, engagement, creator characteristics, content, and upload timing.
@@ -48,7 +50,7 @@ pip install -r requirements.txt
 pip install pandas numpy matplotlib seaborn scikit-learn xgboost notebook
 ```
 
-The analysis notebooks read the frozen data copy at `../shorts-data-frozen-2026-10-31-c704032/data/`, a folder next to this repository. YouTube's API terms of service do not allow us to publish that data, so the published results can be inspected in the notebooks' saved outputs but not reproduced exactly.
+The analysis notebooks read the frozen data copy at `../shorts-data-frozen-2026-10-31-c704032/data/`, a folder next to this repository. As stated above, YouTube's API terms of service do not allow us to publish that data, so the published results can be inspected in the notebooks' saved outputs but not reproduced exactly.
 
 ## Running the Code with Fake Data
 
